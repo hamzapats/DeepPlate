@@ -4,7 +4,6 @@ import Footer from "../components/Footer";
 import Rivet from "../components/Rivet";
 import Reveal from "../components/Reveal";
 import { FONT } from "../constants/ui";
-import { ROUTES } from "../constants/routes";
 import {
   UploadCloud,
   ScanLine,
@@ -83,13 +82,15 @@ const PRESETS = [
 export default function PredictionPage() {
   const [selectedPreset, setSelectedPreset] = useState(PRESETS[0]);
   const [uploadedImage, setUploadedImage] = useState(null);
+  const [selectedFile, setSelectedFile] = useState(null);
+  const [inferenceResult, setInferenceResult] = useState(null);
+  const [inferenceError, setInferenceError] = useState("");
   const [isScanning, setIsScanning] = useState(false);
   const [hasScanned, setHasScanned] = useState(true);
   const [activeFilter, setActiveFilter] = useState("enhanced"); // 'raw', 'enhanced', 'binary'
   const [confThreshold, setConfThreshold] = useState(0.5);
   const [enableClahe, setEnableClahe] = useState(true);
   const [copied, setCopied] = useState(false);
-  const [customPlateInput, setCustomPlateInput] = useState("");
   const fileInputRef = useRef(null);
 
   useEffect(() => {
@@ -98,19 +99,76 @@ export default function PredictionPage() {
     return () => root.classList.remove("scroll-smooth");
   }, []);
 
-  const handleFileUpload = (e) => {
-    const file = e.target.files?.[0];
-    if (file) {
-      const reader = new FileReader();
-      reader.onload = (event) => {
-        setUploadedImage(event.target.result);
-        triggerInference();
-      };
-      reader.readAsDataURL(file);
+  useEffect(() => {
+    return () => {
+      if (uploadedImage?.startsWith("blob:")) {
+        URL.revokeObjectURL(uploadedImage);
+      }
+    };
+  }, [uploadedImage]);
+
+  const runInference = async (file) => {
+    setIsScanning(true);
+    setHasScanned(false);
+    setInferenceError("");
+    setInferenceResult(null);
+
+    const formData = new FormData();
+    formData.append("file", file);
+
+    const startedAt = performance.now();
+    try {
+      let response;
+      try {
+        response = await fetch("/api/predict", {
+          method: "POST",
+          body: formData,
+        });
+      } catch {
+        // Direct proxy fallback if Express is not running
+        response = await fetch("/inference/api/predict", {
+          method: "POST",
+          body: formData,
+        });
+      }
+      const body = await response.json();
+      if (!response.ok) {
+        throw new Error(body.detail || "Inference request failed.");
+      }
+
+      setInferenceResult({
+        ...body,
+        inference_time_ms: Math.round(performance.now() - startedAt),
+      });
+    } catch (error) {
+      setInferenceError(
+        error instanceof Error
+          ? error.message
+          : "Inference failed. Check that the server and ML API are running.",
+      );
+    } finally {
+      setIsScanning(false);
+      setHasScanned(true);
     }
   };
 
+  const handleFileUpload = (e) => {
+    const file = e.target.files?.[0];
+    e.target.value = "";
+    if (!file) return;
+
+    setSelectedFile(file);
+    setUploadedImage(URL.createObjectURL(file));
+    setSelectedPreset(PRESETS[0]);
+    runInference(file);
+  };
+
   const triggerInference = () => {
+    if (selectedFile) {
+      runInference(selectedFile);
+      return;
+    }
+
     setIsScanning(true);
     setHasScanned(false);
     setTimeout(() => {
@@ -119,15 +177,7 @@ export default function PredictionPage() {
     }, 1200);
   };
 
-  const activePlate = customPlateInput.trim()
-    ? {
-        ...selectedPreset,
-        plateText: customPlateInput.toUpperCase().replace(/\s+/g, ""),
-        stateName: "Custom User Vehicle",
-        ocrConf: 0.952,
-        charConf: Array.from(customPlateInput.replace(/\s+/g, "")).map(() => 0.95),
-      }
-    : selectedPreset;
+  const activePlate = selectedPreset;
 
   const resultPayload = {
     model: "PlateGuard ANPR Pipeline v1.0",
@@ -159,8 +209,10 @@ export default function PredictionPage() {
     inference_time_ms: 142.6,
   };
 
-  const copyJSON = () => {
-    navigator.clipboard.writeText(JSON.stringify(resultPayload, null, 2));
+  const displayedPayload = inferenceResult || resultPayload;
+
+  const copyJSON = async () => {
+    await navigator.clipboard.writeText(JSON.stringify(displayedPayload, null, 2));
     setCopied(true);
     setTimeout(() => setCopied(false), 2000);
   };
@@ -176,7 +228,7 @@ export default function PredictionPage() {
             <div className="flex flex-wrap items-center justify-between gap-4">
               <div className="flex items-center gap-2">
                 <a
-                  href={ROUTES.home}
+                  href="/"
                   className={`${FONT.mono} text-xs font-bold uppercase tracking-[0.2em] text-[#111111]/60 hover:text-[#111111]`}
                 >
                   Home
@@ -191,7 +243,7 @@ export default function PredictionPage() {
                 className={`${FONT.mono} inline-flex items-center gap-2 rounded-sm border-2 border-[#111111] bg-[#FFD600] px-3 py-1.5 text-xs font-bold uppercase tracking-[0.2em] text-[#111111] shadow-[2px_2px_0_0_#111111]`}
               >
                 <span className="h-2 w-2 animate-pulse rounded-full bg-[#111111]" />
-                PlateGuard YOLO + PaddleOCR Live Studio
+                Live inference on uploads · illustrative presets
               </div>
             </div>
 
@@ -203,9 +255,8 @@ export default function PredictionPage() {
                 </span>
               </h1>
               <p className={`${FONT.body} mt-6 max-w-2xl text-base text-[#111111]/80 sm:text-lg`}>
-                Upload vehicle traffic footage or select one of our test benchmarks below. The fine-tuned YOLO model
-                isolates the registration plate, applies CLAHE enhancement, and runs PaddleOCR to transcribe the text
-                with confidence scoring.
+                Upload a vehicle image to send it to the trained YOLO detector and PaddleOCR API, or select an
+                illustrative benchmark below.
               </p>
             </div>
           </Reveal>
@@ -218,14 +269,16 @@ export default function PredictionPage() {
               </span>
               <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
                 {PRESETS.map((p) => {
-                  const isSelected = !uploadedImage && selectedPreset.id === p.id && !customPlateInput;
+                  const isSelected = !uploadedImage && selectedPreset.id === p.id;
                   return (
                     <button
                       key={p.id}
                       type="button"
                       onClick={() => {
                         setUploadedImage(null);
-                        setCustomPlateInput("");
+                        setSelectedFile(null);
+                        setInferenceResult(null);
+                        setInferenceError("");
                         setSelectedPreset(p);
                         triggerInference();
                       }}
@@ -275,15 +328,46 @@ export default function PredictionPage() {
                   </span>
                 </div>
 
-                {/* Simulated Vehicle Frame Screen */}
+                {/* Image viewport */}
                 <div className="relative my-4 aspect-video overflow-hidden rounded-xl border-2 border-white/20 bg-black flex items-center justify-center">
-                  {/* Background vehicle representation */}
                   {uploadedImage ? (
-                    <img
-                      src={uploadedImage}
-                      alt="Uploaded vehicle"
-                      className="h-full w-full object-contain"
-                    />
+                    <>
+                      <img src={uploadedImage} alt="Uploaded vehicle" className="h-full w-full object-contain" />
+                      {hasScanned && inferenceResult?.plates?.length > 0 && (
+                        <svg
+                          className="pointer-events-none absolute inset-0 h-full w-full"
+                          viewBox={`0 0 ${inferenceResult.image_size.width} ${inferenceResult.image_size.height}`}
+                          aria-label="Detected number plate locations"
+                        >
+                          {inferenceResult.plates.map((plate, index) => {
+                            const { x1, y1, x2, y2 } = plate.bbox;
+                            return (
+                              <g key={`${x1}-${y1}-${index}`}>
+                                <rect
+                                  x={x1}
+                                  y={y1}
+                                  width={x2 - x1}
+                                  height={y2 - y1}
+                                  fill="#FFD600"
+                                  fillOpacity="0.15"
+                                  stroke="#FFD600"
+                                  strokeWidth={Math.max(inferenceResult.image_size.width / 400, 2)}
+                                />
+                                <text
+                                  x={x1}
+                                  y={Math.max(y1 - inferenceResult.image_size.height / 100, 18)}
+                                  fill="#FFD600"
+                                  fontSize={Math.max(inferenceResult.image_size.width / 70, 14)}
+                                  fontWeight="bold"
+                                >
+                                  PLATE {(plate.detection_confidence * 100).toFixed(1)}%
+                                </text>
+                              </g>
+                            );
+                          })}
+                        </svg>
+                      )}
+                    </>
                   ) : (
                     <div className={`h-full w-full bg-gradient-to-b ${activePlate.carColor} flex flex-col justify-between p-6`}>
                       <div className="flex justify-between text-[11px] font-mono text-white/50">
@@ -336,6 +420,11 @@ export default function PredictionPage() {
                     <div className="absolute inset-x-0 h-1 bg-[#FFD600] shadow-[0_0_20px_4px_#FFD600] animate-[bounce_1.2s_infinite]" />
                   )}
                 </div>
+                {inferenceError && (
+                  <p role="alert" className="mb-4 rounded border border-red-300 bg-red-950/60 p-3 text-sm text-red-100">
+                    {inferenceError}
+                  </p>
+                )}
 
                 {/* Upload & Run Controls */}
                 <div className="flex flex-wrap items-center justify-between gap-4 border-t border-white/15 pt-4">
@@ -360,8 +449,11 @@ export default function PredictionPage() {
                         type="button"
                         onClick={() => {
                           setUploadedImage(null);
+                          setSelectedFile(null);
+                          setInferenceResult(null);
+                          setInferenceError("");
                           setSelectedPreset(PRESETS[0]);
-                          triggerInference();
+                          setHasScanned(true);
                         }}
                         className={`${FONT.tech} inline-flex items-center gap-1.5 rounded-md border border-white/20 px-3 py-2 text-xs font-bold uppercase text-white/70 hover:text-white`}
                       >
@@ -381,8 +473,8 @@ export default function PredictionPage() {
                 </div>
               </div>
 
-              {/* Adjustable Pipeline Parameters */}
-              <div className="rounded-xl border-2 border-[#111111] bg-white p-5 shadow-[4px_4px_0_0_#111111]">
+              {/* Demo-only controls: upload inference uses the API configuration. */}
+              {!uploadedImage && <div className="rounded-xl border-2 border-[#111111] bg-white p-5 shadow-[4px_4px_0_0_#111111]">
                 <div className="flex items-center justify-between">
                   <span className={`${FONT.mono} text-xs font-bold uppercase tracking-wider text-[#111111] flex items-center gap-1.5`}>
                     <Sliders className="h-4 w-4" /> Hyperparameter Tuning
@@ -425,10 +517,85 @@ export default function PredictionPage() {
                     </span>
                   </div>
                 </div>
-              </div>
+              </div>}
             </div>
 
-            {/* Right Column: OCR Results & Inspection */}
+            {uploadedImage ? (
+              <div className="lg:col-span-5 space-y-6">
+                <section className="rounded-2xl border-4 border-[#111111] bg-white p-6 shadow-[8px_8px_0_0_#111111]">
+                  <div className="flex items-center justify-between border-b-2 border-[#111111]/10 pb-4">
+                    <span className={`${FONT.mono} text-xs font-bold uppercase tracking-wider text-[#111111]/60`}>
+                      Live API Results
+                    </span>
+                    <span className="text-xs font-mono text-[#111111]/60">
+                      {inferenceResult?.plates?.length ?? 0} plate(s)
+                    </span>
+                  </div>
+
+                  {isScanning ? (
+                    <p className="py-8 text-center font-mono text-sm">Running detection and OCR…</p>
+                  ) : inferenceError ? (
+                    <p className="py-8 text-center font-mono text-sm text-red-700">{inferenceError}</p>
+                  ) : inferenceResult?.plates?.length ? (
+                    <div className="mt-4 space-y-4">
+                      {inferenceResult.plates.map((plate, index) => (
+                        <div key={`${plate.bbox.x1}-${plate.bbox.y1}-${index}`} className="rounded-xl border border-[#111111]/15 p-4">
+                          <div className="mb-3 flex items-center justify-between">
+                            <span className={`${FONT.mono} text-xs font-bold uppercase`}>Plate {index + 1}</span>
+                            <span className="text-xs font-mono">
+                              Detection {(plate.detection_confidence * 100).toFixed(1)}%
+                            </span>
+                          </div>
+                          <div className={`${FONT.display} break-all text-3xl tracking-wider`}>
+                            {plate.plate_text || "Text not recognized"}
+                          </div>
+                          <div className="mt-3 grid grid-cols-2 gap-2 text-xs font-mono text-[#111111]/70">
+                            <span>OCR confidence</span>
+                            <span className="text-right">
+                              {plate.ocr_confidence == null ? "—" : `${(plate.ocr_confidence * 100).toFixed(1)}%`}
+                            </span>
+                            <span>Box (x1, y1, x2, y2)</span>
+                            <span className="text-right">
+                              {plate.bbox.x1}, {plate.bbox.y1}, {plate.bbox.x2}, {plate.bbox.y2}
+                            </span>
+                          </div>
+                        </div>
+                      ))}
+                      <p className="text-right text-xs font-mono text-[#111111]/60">
+                        Request time: {inferenceResult.inference_time_ms} ms
+                      </p>
+                    </div>
+                  ) : (
+                    <p className="py-8 text-center font-mono text-sm text-[#111111]/70">
+                      No number plate detected in this image.
+                    </p>
+                  )}
+                </section>
+
+                {inferenceResult && (
+                  <div className="relative rounded-2xl border-4 border-[#111111] bg-[#111111] p-5 text-white shadow-[4px_4px_0_0_#FFD600]">
+                    <div className="mb-3 flex items-center justify-between">
+                      <span className={`${FONT.mono} text-xs font-bold uppercase tracking-wider text-[#FFD600]`}>
+                        API JSON Output
+                      </span>
+                      <button
+                        type="button"
+                        onClick={copyJSON}
+                        className="inline-flex items-center gap-1.5 rounded bg-white/10 px-2.5 py-1 text-xs font-mono text-white/80 hover:bg-white/20"
+                      >
+                        {copied ? <Check className="h-3 w-3 text-green-400" /> : <Copy className="h-3 w-3" />}
+                        {copied ? "Copied" : "Copy Payload"}
+                      </button>
+                    </div>
+                    <pre className="max-h-60 overflow-y-auto rounded-lg bg-black/60 p-3 text-[11px] leading-relaxed text-green-400">
+                      {JSON.stringify(inferenceResult, null, 2)}
+                    </pre>
+                  </div>
+                )}
+              </div>
+            ) : (
+            <>
+            {/* Demo preset results */}
             <div className="lg:col-span-5 space-y-6">
               {/* Embossed Plate & Recognition Badge */}
               <div className="rounded-2xl border-4 border-[#111111] bg-white p-6 shadow-[8px_8px_0_0_#111111]">
@@ -573,10 +740,12 @@ export default function PredictionPage() {
                   </button>
                 </div>
                 <pre className="max-h-40 overflow-y-auto text-[11px] font-mono text-green-400 bg-black/60 p-3 rounded-lg leading-relaxed">
-                  {JSON.stringify(resultPayload, null, 2)}
+                  {JSON.stringify(displayedPayload, null, 2)}
                 </pre>
               </div>
             </div>
+            </>
+            )}
           </div>
         </div>
       </main>

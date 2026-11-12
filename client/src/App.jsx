@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import LandingPage from "./pages/LandingPage";
+import AboutPage from "./pages/AboutPage";
 import HowItWorksPage from "./pages/HowItWorksPage";
 import PredictionPage from "./pages/PredictionPage";
 
@@ -21,11 +22,15 @@ export default function App() {
 
   const path = pathname.replace(/\/$/, "") || "/";
 
+  if (path === "/about") {
+    return <AboutPage />;
+  }
+
   if (path === "/how-it-works") {
     return <HowItWorksPage />;
   }
 
-  if (path === "/demo") {
+  if (path === "/predict" || path === "/demo") {
     return <PredictionPage />;
   }
 

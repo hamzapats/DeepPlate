@@ -1,0 +1,7 @@
+# YOLO dataset config -- fill in the paths when your dataset is ready
+path: ____________________      # dataset root, e.g. /content/datasets/plates
+train: images/train
+val: images/val
+test: images/test
+names:
+  0: number_plate

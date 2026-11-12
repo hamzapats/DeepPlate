@@ -2,6 +2,11 @@
 node_modules/
 client/node_modules/
 server/node_modules/
+__pycache__/
+*.py[cod]
+
+# Trained model weights are shared separately from Git.
+/models/weights/*.pt
 
 # Environment variables and secrets
 .env

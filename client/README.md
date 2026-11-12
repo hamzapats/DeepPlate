@@ -1,16 +1,22 @@
-# React + Vite
+# DeepPlate client
 
-This template provides a minimal setup to get React working in Vite with HMR and some Oxlint rules.
+## Run locally with the inference API
 
-Currently, two official plugins are available:
+1. Start the Python inference API from `models`:
 
-- [@vitejs/plugin-react](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react) uses [Oxc](https://oxc.rs)
-- [@vitejs/plugin-react-swc](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react-swc) uses [SWC](https://swc.rs/)
+   ```powershell
+   python -m uvicorn api:app --host 127.0.0.1 --port 8000
+   ```
 
-## React Compiler
+2. In another terminal, start the Vite client:
 
-The React Compiler is not enabled on this template because of its impact on dev & build performances. To add it, see [this documentation](https://react.dev/learn/react-compiler/installation).
+   ```powershell
+   npm install
+   npm run dev
+   ```
 
-## Expanding the Oxlint configuration
+3. Open the Vite URL and upload a vehicle image. Vite forwards `/inference/*`
+   requests to the Python API on port 8000. The sample benchmark cards remain
+   illustrative; uploaded images use live model results.
 
-If you are developing a production application, we recommend using TypeScript with type-aware lint rules enabled. Check out the [TS template](https://github.com/vitejs/vite/tree/main/packages/create-vite/template-react-ts) for information on how to integrate TypeScript and Oxlint's TypeScript related rules in your project.
+The existing Express API continues to receive `/api/*` requests on port 5000.
